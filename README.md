@@ -26,12 +26,12 @@ In order to run the code, you will need the following:
 
 ### Structure
 
-There is one script for [training unconditional models](../blob/master/train_unconditional.py) and one for [training conditional models](../blob/master/train_conditional.py).
-These scripts expect a running `visdom` server for [visualization](../blob/master/monitoring.py) and the import of a config file specifying the model and hyperparameters.
-Config files for all models used in the paper are supplied in the directory [configs](../blob/master/configs).
+There is one script for [training unconditional models](../master/train_unconditional.py) and one for [training conditional models](../master/train_conditional.py).
+These scripts expect a running `visdom` server for [visualization](../master/monitoring.py) and the import of a config file specifying the model and hyperparameters.
+Config files for all models used in the paper are supplied in the directory [configs](../master/configs).
 
-The recursive affine coupling block is implemented as a `FrEIA`-compatible module in [hint.py](../blob/master/hint.py) and will be officially added to the framework in the future.
+The recursive affine coupling block is implemented as a `FrEIA`-compatible module in [hint.py](../master/hint.py) and will be officially added to the framework in the future.
 
-Data sets for training and evaluation are created with [an additional script](../blob/master/data.py), but note that we maintain [another repository](https://github.com/VLL-HD/inn_toy_data) with the latest versions of all our toy data sets. The script also contains code for the plots used in our paper.
+Data sets for training and evaluation are created with [an additional script](../master/data.py), but note that we maintain [another repository](https://github.com/VLL-HD/inn_toy_data) with the latest versions of all our toy data sets. The script also contains code for the plots used in our paper.
 
-The [last script file](../blob/master/rejection_sampling.py) deals with the rejection sampling baseline and systematic comparisons between the trained models. The first run of this script will take some time as the baseline is very inefficient, but results are stored and subsequent runs go much faster.
+The [last script file](../master/rejection_sampling.py) deals with the rejection sampling baseline and systematic comparisons between the trained models. The first run of this script will take some time as the baseline is very inefficient, but results are stored and subsequent runs go much faster.
