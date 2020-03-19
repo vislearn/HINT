@@ -1,12 +1,11 @@
 # HINT
 Code for the research paper "HINT: Hierarchical Invertible Neural Transport for Density Estimation and Bayesian Inference".
-Pre-print available at [arXiv](https://arxiv.org/abs/1905.10687).
 
-Please cite as:
+A pre-print is available at [arXiv](https://arxiv.org/abs/1905.10687), for now please cite as:
 ```
 @misc{kruse2019hint,
     title = {HINT: Hierarchical Invertible Neural Transport for Density Estimation and Bayesian Inference},
-    author = {Jakob Kruse and Gianluca Detommaso and Robert Scheichl and Ullrich Köthe},
+    author = {Jakob Kruse and Gianluca Detommaso and Robert Scheichl and Ullrich K"othe},
     year = {2019},
     eprint = {1905.10687},
     archivePrefix = {arXiv}
