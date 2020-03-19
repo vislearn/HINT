@@ -5,7 +5,7 @@ A pre-print is available at [arXiv](https://arxiv.org/abs/1905.10687), for now p
 ```
 @misc{kruse2019hint,
     title = {HINT: Hierarchical Invertible Neural Transport for Density Estimation and Bayesian Inference},
-    author = {Jakob Kruse and Gianluca Detommaso and Robert Scheichl and Ullrich K"othe},
+    author = {Jakob Kruse and Gianluca Detommaso and Robert Scheichl and Ullrich K\"othe},
     year = {2019},
     eprint = {1905.10687},
     archivePrefix = {arXiv}
