@@ -15,7 +15,10 @@ from tqdm import tqdm
 # np.seterr(divide='ignore', invalid='ignore')
 
 
-# UCI data preparation adapted from https://github.com/LukasRinder/normalizing-flows
+''' UCI data preparation adapted from https://github.com/LukasRinder/normalizing-flows
+To use these data sets, download https://zenodo.org/record/1161203/files/data.tar.gz
+and extract 'power', 'gas' and 'miniboone' into a directory named 'uci_data'
+'''
 
 
 # Helper classes and functions
