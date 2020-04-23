@@ -64,7 +64,8 @@ class LiveVisualizer(Visualizer):
         self.visdom_handle._send({'data': traces, 'layout': layout, 'win': 'loss_trajectories'})
 
         # Application-specific plot
-        self.application_plot = self.visdom_handle.matplot(self.c.data_model.init_plot(self.c.vis_y_target))
+        if callable(getattr(self.c.data_model, "init_plot", None)):
+            self.application_plot = self.visdom_handle.matplot(self.c.data_model.init_plot(self.c.vis_y_target))
 
         # Plot for samples from marginal latent distribution
         self.latent_plot = self.visdom_handle.scatter(X=np.zeros((1,2)), opts={'margin': {'l': 0, 'r': 0, 'b': 0, 't': 0, 'pad': 0}})
@@ -97,8 +98,9 @@ class LiveVisualizer(Visualizer):
             ))
 
         # Update application-specific plot
-        self.c.data_model.update_plot(x_test, self.c.vis_y_target)
-        self.visdom_handle.matplot(plt.gcf(), win=self.application_plot)
+        if callable(getattr(self.c.data_model, "update_plot", None)):
+            self.c.data_model.update_plot(x_test, self.c.vis_y_target)
+            self.visdom_handle.matplot(plt.gcf(), win=self.application_plot)
 
     def update_progress(self, current_batch, current_epoch):
         bgcolor = '#CCCCCC'

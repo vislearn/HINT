@@ -1,10 +1,10 @@
-import os, glob, json
+import os, glob
 import numpy as np
-import torch
-import torch.utils.data
+import pandas as pd
 import pickle
+import torch
+from torch.utils.data import TensorDataset, DataLoader
 from numpy.random import rand, randn
-from scipy.io import loadmat
 from scipy.spatial.distance import pdist, squareform
 from matplotlib import pyplot as plt
 from collections import defaultdict
@@ -14,6 +14,16 @@ from tqdm import tqdm
 
 # np.seterr(divide='ignore', invalid='ignore')
 
+
+# UCI data preparation adapted from https://github.com/LukasRinder/normalizing-flows
+
+
+# Helper classes and functions
+
+class Data:
+    def __init__(self, data):
+        self.x = data.astype(np.float32)
+        self.N = self.x.shape[0]
 
 def star_with_given_circularity(circularity=1, n=7):
     # Spread 2*n points along unit circle
@@ -33,7 +43,6 @@ def star_with_given_circularity(circularity=1, n=7):
         xy[::2,:] *= r
     return xy
 
-
 def rect_with_given_aspect_and_angle(aspect_ratio, angle):
     xy = np.array([[-1,1], [-1,-1], [1,-1], [1,1], [-1,1]], dtype=float)
     xy[:,1] *= aspect_ratio
@@ -42,6 +51,8 @@ def rect_with_given_aspect_and_angle(aspect_ratio, angle):
     return xy
 
 
+
+# Actual data sets
 
 class FourierCurveModel():
 
@@ -191,6 +202,7 @@ class FourierCurveModel():
                   min(-5, points[:,:,1].min() - 1), max(5, points[:,:,1].max() + 1)])
 
 
+
 class PlusShapeModel(FourierCurveModel):
 
     n_parameters = 4*25 # must be uneven number times four
@@ -246,6 +258,167 @@ class PlusShapeModel(FourierCurveModel):
 
 
 
+class Power:
+
+    name = 'power'
+    n_parameters = 6
+
+    def __init__(self):
+
+        trn, val, tst = self.load_data_normalised()
+
+        self.trn = Data(trn)
+        self.val = Data(val)
+        self.tst = Data(tst)
+
+        self.n_dims = self.trn.x.shape[1]
+
+    def load_data(self):
+        return np.load('uci_data/power/data.npy')
+
+    def load_data_split_with_noise(self):
+
+        rng = np.random.RandomState(42)
+
+        data = self.load_data()
+        rng.shuffle(data)
+        N = data.shape[0]
+
+        data = np.delete(data, 3, axis=1)
+        data = np.delete(data, 1, axis=1)
+        # global_intensity_noise = 0.1*rng.rand(N, 1)
+        voltage_noise = 0.01*rng.rand(N, 1)
+        # grp_noise = 0.001*rng.rand(N, 1)
+        gap_noise = 0.001*rng.rand(N, 1)
+        sm_noise = rng.rand(N, 3)
+        time_noise = np.zeros((N, 1))
+        noise = np.hstack((gap_noise, voltage_noise, sm_noise, time_noise))
+        data = data + noise
+
+        N_test = int(0.1*data.shape[0])
+        data_test = data[-N_test:]
+        data = data[0:-N_test]
+        N_validate = int(0.1*data.shape[0])
+        data_validate = data[-N_validate:]
+        data_train = data[0:-N_validate]
+
+        return data_train, data_validate, data_test
+
+    def load_data_normalised(self):
+
+        data_train, data_validate, data_test = self.load_data_split_with_noise()
+        data = np.vstack((data_train, data_validate))
+        mu = data.mean(axis=0)
+        s = data.std(axis=0)
+        data_train = (data_train - mu)/s
+        data_validate = (data_validate - mu)/s
+        data_test = (data_test - mu)/s
+
+        return data_train, data_validate, data_test
+
+
+
+class Gas:
+
+    name = 'gas'
+    n_parameters = 8
+
+    def __init__(self):
+
+        trn, val, tst = self.load_data_and_clean_and_split('uci_data/gas/ethylene_CO.pickle')
+
+        self.trn = Data(trn)
+        self.val = Data(val)
+        self.tst = Data(tst)
+
+        self.n_dims = self.trn.x.shape[1]
+
+    def load_data(self, file):
+
+        data = pd.read_pickle(file)
+        data.drop("Meth", axis=1, inplace=True)
+        data.drop("Eth", axis=1, inplace=True)
+        data.drop("Time", axis=1, inplace=True)
+        return data
+
+    def get_correlation_numbers(self, data):
+
+        C = data.corr()
+        A = C > 0.98
+        B = A.values.sum(axis=1)
+        return B
+
+    def load_data_and_clean(self, file):
+
+        data = self.load_data(file)
+        B = self.get_correlation_numbers(data)
+
+        while np.any(B > 1):
+            col_to_remove = np.where(B > 1)[0][0]
+            col_name = data.columns[col_to_remove]
+            data.drop(col_name, axis=1, inplace=True)
+            B = self.get_correlation_numbers(data)
+        data = (data-data.mean())/data.std()
+
+        return data
+
+    def load_data_and_clean_and_split(self, file):
+
+        data = self.load_data_and_clean(file).values
+        N_test = int(0.1*data.shape[0])
+        data_test = data[-N_test:]
+        data_train = data[0:-N_test]
+        N_validate = int(0.1*data_train.shape[0])
+        data_validate = data_train[-N_validate:]
+        data_train = data_train[0:-N_validate]
+
+        return data_train, data_validate, data_test
+
+
+
+class Miniboone:
+
+    name = 'miniboone'
+    n_parameters = 42
+
+    def __init__(self):
+
+        trn, val, tst = self.load_data_normalised('uci_data/miniboone/data.npy')
+
+        self.trn = Data(trn[:,0:-1])
+        self.val = Data(val[:,0:-1])
+        self.tst = Data(tst[:,0:-1])
+
+        self.n_dims = self.trn.x.shape[1]
+
+    def load_data(self, root_path):
+
+        data = np.load(root_path)
+        N_test = int(0.1*data.shape[0])
+        data_test = data[-N_test:]
+        data = data[0:-N_test]
+        N_validate = int(0.1*data.shape[0])
+        data_validate = data[-N_validate:]
+        data_train = data[0:-N_validate]
+
+        return data_train, data_validate, data_test
+
+    def load_data_normalised(self, root_path):
+
+        data_train, data_validate, data_test = self.load_data(root_path)
+        data = np.vstack((data_train, data_validate))
+        mu = data.mean(axis=0)
+        s = data.std(axis=0)
+        data_train = (data_train - mu)/s
+        data_validate = (data_validate - mu)/s
+        data_test = (data_test - mu)/s
+
+        return data_train, data_validate, data_test
+
+
+
+
+
 def prepare_data_loaders(model, n_train, n_test, batch_size):
     try:
         x_train = np.load(f'data/{model.name}_x_train.npy')[:n_train,:]
@@ -270,241 +443,40 @@ def prepare_data_loaders(model, n_train, n_test, batch_size):
         y_test = model.forward_process(x_test)
         np.save(f'data/{model.name}_y_test', y_test)
 
-    train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train)),
-                                               batch_size=batch_size,
-                                               shuffle=True,
-                                               drop_last=True)
-    test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(torch.Tensor(x_test), torch.Tensor(y_test)),
-                                              batch_size=batch_size,
-                                              shuffle=True,
-                                              drop_last=True)
+    train_loader = DataLoader(TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train)),
+                              batch_size=batch_size, shuffle=True, drop_last=True)
+    test_loader =  DataLoader(TensorDataset(torch.Tensor(x_test), torch.Tensor(y_test)),
+                              batch_size=batch_size, shuffle=True, drop_last=True)
+
     return train_loader, test_loader
 
 
-def plot_dataset_example(model, limits=[-5,4,-4,5], n_samples=1000, seed=0):
-    np.random.seed(seed)
-    x = model.sample_prior(n_samples)
-    x = model.unflatten_coeffs(x)
-    points = model.trace_fourier_curves(x)
 
-    fig = plt.figure(figsize=(15.3,3))
-    axes = fig.subplots(1,5)
+def prepare_uci_loaders(dataset_name="power", batch_size=1000, shuffle=True):
 
-    for i in range(len(points)):
-        axes[0].plot(points[i,:,0], points[i,:,1], c=(0,0,0,min(1,10/len(points))), zorder=1)
-    axes[0].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[0].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-    axes[0].set_xticks([]); axes[0].set_yticks([])
-    axes[0].axis(limits)
-
-    for i in range(4):
-        if model.name == 'plus-shape':
-            coords = model.generate_plus_shape()
-            axes[i+1].fill(coords[:,0], coords[:,1], fc=(1,1,1,0), ec=(1,0,0,.5), lw=2, zorder=-10)
-            # axes[i+1].scatter(coords[:,0], coords[:,1], c=[(1,0,0,.25)], s=1, zorder=-10)
-            points[i,:] = model.trace_fourier_curves(model.fourier_coeffs(coords, 25)[None,:,:])
-        axes[i+1].plot(points[i,:,0], points[i,:,1], c=(0,0,0), lw=1, zorder=1)
-        axes[i+1].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[i+1].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-        axes[i+1].set_xticks([]); axes[i+1].set_yticks([])
-        axes[i+1].axis(limits)
-
-    plt.subplots_adjust(left=.01, bottom=.01, right=.99, top=.99, wspace=.02, hspace=.01)
-    plt.savefig(f'data/{model.name}_example.pdf', bbox_inches='tight', pad_inches=0.05)
-    plt.savefig(f'data/{model.name}_example.png', bbox_inches='tight', pad_inches=0.05, dpi=200)
-    plt.show()
-
-
-def plot_model_unconditional(model, c, model_inverse, limits=[-5,4,-4,5], n_samples=1000):
-    z = torch.randn(n_samples, c.ndim_z).to(c.device)
-    x = model_inverse(z)
-    coeffs = c.data_model.unflatten_coeffs(x.data.cpu().numpy())
-    points = c.data_model.trace_fourier_curves(coeffs)
-
-    fig = plt.figure(num=c.suffix, figsize=(15.3,3))
-    axes = fig.subplots(1,5)
-
-    for i in range(len(points)):
-        axes[0].plot(points[i,:,0], points[i,:,1], c=(0,0,0,min(1,10/len(points))), zorder=1)
-    axes[0].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[0].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-    axes[0].set_xticks([]); axes[0].set_yticks([])
-    axes[0].axis(limits)
-
-    for i in range(4):
-        axes[i+1].plot(points[i,:,0], points[i,:,1], c=(0,0,0), lw=1, zorder=1)
-        axes[i+1].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[i+1].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-        axes[i+1].set_xticks([]); axes[i+1].set_yticks([])
-        axes[i+1].axis(limits)
-
-    plt.subplots_adjust(left=.01, bottom=.01, right=.99, top=.99, wspace=.02, hspace=.01)
-    plt.savefig(f'data/{c.suffix}_example.pdf', bbox_inches='tight', pad_inches=0.05)
-    plt.savefig(f'data/{c.suffix}_example.png', bbox_inches='tight', pad_inches=0.05, dpi=200)
-    plt.show()
-
-
-def plot_model_conditional(model, c, model_inverse, y_target, limits=[-5,4,-4,5], n_samples=1000):
-    if 'hint' in c.suffix:
-        z = torch.randn(n_samples, c.ndim_x).cuda()
-        y_target = torch.Tensor([y_target]*n_samples).view(n_samples,3).cuda()
-        model_sample = model_inverse(y_target, z).data.cpu().numpy()
+    if dataset_name == "power":
+        data = Power()
+    elif dataset_name == "gas":
+        data = Gas()
+    elif dataset_name == "miniboone":
+        data = Miniboone()
     else:
-        z = torch.randn(n_samples, c.ndim_z).cuda()
-        y_target = torch.Tensor([y_target]*n_samples).view(n_samples,3).cuda()
-        model_sample = model_inverse(y_target, z).data.cpu().numpy()
+        raise ValueError("Dataset not known.")
 
-    coeffs = c.data_model.unflatten_coeffs(model_sample)
-    points = c.data_model.trace_fourier_curves(coeffs)
+    # print('\n' + dataset_name, data.trn.x.shape, data.val.x.shape, data.tst.x.shape)
+    train_loader = DataLoader(TensorDataset(torch.Tensor(data.trn.x), torch.zeros(len(data.trn.x),1)),
+                              batch_size=batch_size, shuffle=shuffle, drop_last=True)
+    test_loader  = DataLoader(TensorDataset(torch.Tensor(data.tst.x), torch.zeros(len(data.tst.x),1)),
+                              batch_size=len(data.tst.x), shuffle=shuffle, drop_last=True)
+    # print('train batches:', len(train_loader), '| test batches:', len(test_loader))
 
-    fig = plt.figure(num=c.suffix, figsize=(15.3,3))
-    axes = fig.subplots(1,5)
+    return train_loader, test_loader
 
-    for i in range(len(points)):
-        axes[0].plot(points[i,:,0], points[i,:,1], c=(0,0,0,min(1,10/len(points))), zorder=1)
-    axes[0].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[0].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-    axes[0].set_xticks([]); axes[0].set_yticks([])
-    axes[0].axis(limits)
-
-    for i in range(4):
-        axes[i+1].plot(points[i,:,0], points[i,:,1], c=(0,0,0), lw=1, zorder=1)
-        axes[i+1].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[i+1].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-        # Find largest diameter of the shape
-        d = squareform(pdist(points[i]))
-        max_idx = np.unravel_index(d.argmax(), d.shape)
-        p0, p1 = points[i,max_idx[0]], points[i,max_idx[1]]
-        angle = np.arctan2((p1-p0)[1], (p1-p0)[0])
-        max_diameter = d[max_idx]
-        # Find largest width orthogonal to diameter
-        cos, sin = np.cos(angle), np.sin(angle)
-        rotation = np.matrix([[cos, sin], [-sin, cos]])
-        p_rotated = np.dot(rotation, points[i].T).T
-        min_diameter = np.max(p_rotated[:,1]) - np.min(p_rotated[:,1])
-        aspect_ratio = min_diameter / max_diameter
-        # Make bounding boxes
-        x_min, x_max = np.min(p_rotated[:,0]), np.max(p_rotated[:,0])
-        y_min, y_max = np.min(p_rotated[:,1]), np.max(p_rotated[:,1])
-        rect = np.array([[x_min,y_min], [x_min,y_max], [x_max,y_max], [x_max,y_min], [x_min,y_min]])
-        cos, sin = np.cos(-angle), np.sin(-angle)
-        rotation = np.matrix([[cos, sin], [-sin, cos]])
-        rect = np.dot(rotation, rect.T).T
-        target_rect = rect_with_given_aspect_and_angle(y_target[0,0].item(), y_target[0,2].item())
-        target_rect = np.mean(rect[:-1,:], axis=0) + 0.5*max_diameter * target_rect
-        axes[i+1].plot(target_rect[:,0], target_rect[:,1], c=(0,1,0,.2), lw=2, zorder=-2)
-        axes[i+1].plot(rect[:,0], rect[:,1], c=(1,0,0,.2), lw=1, zorder=-1)
-        # Circularity
-        target_star = 0.95 * np.min(limits) * star_with_given_circularity(y_target[0,1].item(), n=36)
-        axes[i+1].plot(target_star[:,0], target_star[:,1], c=(0,1,0,.2), lw=2, zorder=-2)
-        shape = geo.Polygon(points[i])
-        circularity = 4*np.pi * shape.area / shape.length**2
-        star = 0.95 * np.min(limits) * star_with_given_circularity(circularity, n=36)
-        axes[i+1].plot(star[:,0], star[:,1], c=(1,0,0,.2), lw=1, zorder=-1)
-
-        axes[i+1].set_xticks([]); axes[i+1].set_yticks([])
-        axes[i+1].axis(limits)
-
-    plt.subplots_adjust(left=.01, bottom=.01, right=.99, top=.99, wspace=.02, hspace=.01)
-    plt.savefig(f'data/{c.suffix}_example.pdf', bbox_inches='tight', pad_inches=0.05)
-    plt.savefig(f'data/{c.suffix}_example.png', bbox_inches='tight', pad_inches=0.05, dpi=200)
-    plt.show()
-
-
-def plot_model_conditional_abc(model, c, model_inverse, limits=[-5,4,-4,5], n_samples=1000, i=0):
-    with open(f'abc/{c.data_model.name}/{i:05}.pkl', 'rb') as f:
-        y_target, gt_sample, threshold = pickle.load(f)
-    # y_target = c.vis_y_target
-    if 'hint' in c.suffix:
-        z = torch.randn(n_samples, c.ndim_x).cuda()
-        y_target = torch.Tensor([y_target]*n_samples).view(n_samples,3).cuda()
-        model_sample = model_inverse(y_target, z).data.cpu().numpy()
-    else:
-        z = torch.randn(n_samples, c.ndim_z).cuda()
-        y_target = torch.Tensor([y_target]*n_samples).view(n_samples,3).cuda()
-        model_sample = model_inverse(y_target, z).data.cpu().numpy()
-    samples = [gt_sample[:n_samples,:], model_sample]
-    # samples = [model_sample]
-
-    fig = plt.figure(num=c.suffix, figsize=(6.2,3))
-    axes = fig.subplots(1,2)
-
-    for i, sample in enumerate(samples):
-        coeffs = c.data_model.unflatten_coeffs(samples[i])
-        points = c.data_model.trace_fourier_curves(coeffs)
-
-        for j in range(len(points)):
-            axes[i].plot(points[j,:,0], points[j,:,1], c=(0,0,0,min(1,10/len(points))), zorder=1)
-        axes[i].axvline(0, c='gray', ls=':', lw=.5, zorder=-1); axes[i].axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
-        axes[i].set_xticks([]); axes[i].set_yticks([])
-        axes[i].axis(limits)
-
-    plt.subplots_adjust(left=.01, bottom=.01, right=.99, top=.99, wspace=.02, hspace=.01)
-    # plt.savefig(f'data/{model.name}_example.pdf', bbox_inches='tight', pad_inches=0.05)
-    # plt.savefig(f'data/{model.name}_example.png', bbox_inches='tight', pad_inches=0.05, dpi=200)
-    plt.show()
-
-
-def plot_fouriercurve_example():
-    model = PlusShapeModel()
-    with open(f'data/frog.json', 'r') as file:
-        points = json.load(file)['points']
-    points = np.array([[p['x'], p['y']] for p in points])
-    points_dense = model.densify_polyline(points, 0.012)
-    Ms = [1,2,3,5,10,20]
-    coeffs = [model.fourier_coeffs(points, 2*i+1)[None,:,:] for i in Ms]
-    curves = [model.trace_fourier_curves(c, 200)[0] for c in coeffs]
-
-    fig = plt.figure(figsize=(9.5,3))
-    axes = fig.subplots(1,3)
-
-    axes[0].fill(points[:,0], points[:,1], fc=(0,0,0,.1), ec=(0,0,0,.5), lw=2, zorder=1)
-    axes[1].plot(points[:,0], points[:,1], c=(1,0,0,.5), lw=1, zorder=1)
-    axes[1].scatter(points_dense[:,0], points_dense[:,1], c=[(1,0,0)], s=1, zorder=1)
-    axes[2].set_prop_cycle(plt.cycler('color', plt.cm.viridis(np.linspace(0.2,.9,len(Ms))[::-1])))
-    for i in range(len(curves)):
-        axes[2].plot(curves[i][:,0], curves[i][:,1], lw=1, zorder=1, label=2*Ms[i]+1)
-    axes[2].legend(loc='upper center', title='# Fourier terms', ncol=3, fontsize=6)
-
-    for i in range(3):
-        axes[i].set_xticks([]); axes[i].set_yticks([])
-        axes[i].axis([-.2,1.2,-.1,1.3])
-    plt.subplots_adjust(left=.01, bottom=.01, right=.99, top=.99, wspace=.02, hspace=.01)
-    plt.savefig(f'data/general_example.pdf', bbox_inches='tight', pad_inches=0.05)
-    plt.savefig(f'data/general_example.png', bbox_inches='tight', pad_inches=0.05, dpi=200)
-    plt.show()
 
 
 if __name__ == '__main__':
     pass
 
-    # plot_dataset_example(FourierCurveModel(), limits=[-5,4,-4,5], seed=10)
-    plot_dataset_example(PlusShapeModel(), limits=[-4,4,-4,4], seed=11)
-    # plot_fouriercurve_example()
-
-
-    # from configs.fourier_curve.conditional_hint_4_full import c, model, model_inverse
-    # model.load_state_dict(torch.load('output/fourier-curve_conditional_hint-4-full.pt')['net'])
-    # # from configs.fourier_curve.conditional_cinn_4 import c, model, model_inverse
-    # # model.load_state_dict(torch.load('output/fourier-curve_conditional_cinn-4.pt')['net'])
-    # plot_model_conditional_abc(model, c, model_inverse, i=10)
-
-
-    # from configs.fourier_curve.conditional_hint_4_full import c, model, model_inverse
-    # model.load_state_dict(torch.load('output/fourier-curve_conditional_hint-4-full.pt')['net'])
-    # # from configs.fourier_curve.conditional_cinn_4 import c, model, model_inverse
-    # # model.load_state_dict(torch.load('output/fourier-curve_conditional_cinn-4.pt')['net'])
-    # plot_model_conditional(model, c, model_inverse, y_target=c.vis_y_target, limits=[-4,4,-4,4])
-
-    # from configs.fourier_curve.unconditional_hint_2_full import c, model, model_inverse
-    # model.load_state_dict(torch.load('output/fourier-curve_unconditional_hint-2-full.pt')['net'])
-    # # from configs.fourier_curve.unconditional_inn_2 import c, model, model_inverse
-    # # model.load_state_dict(torch.load('output/fourier-curve_unconditional_inn-2.pt')['net'])
-    # plot_model_unconditional(model, c, model_inverse)
-
-
-    # from configs.plus_shape.conditional_hint_4_full import c, model, model_inverse
-    # model.load_state_dict(torch.load('output/plus-shape_conditional_hint-4-full.pt')['net'])
-    # # from configs.plus_shape.conditional_cinn_4 import c, model, model_inverse
-    # # model.load_state_dict(torch.load('output/plus-shape_conditional_cinn-4.pt')['net'])
-    # plot_model_conditional(model, c, model_inverse, y_target=c.vis_y_target, limits=[-4,4,-4,4])
-
-    # # from configs.plus_shape.unconditional_hint_4_full import c, model, model_inverse
-    # # model.load_state_dict(torch.load('output/plus-shape_unconditional_hint-4-full.pt')['net'])
-    # from configs.plus_shape.unconditional_inn_4 import c, model, model_inverse
-    # model.load_state_dict(torch.load('output/plus-shape_unconditional_inn-4.pt')['net'])
-    # plot_model_unconditional(model, c, model_inverse)
+    # train, test = prepare_uci_loaders('power',     batch_size=1660)
+    # train, test = prepare_uci_loaders('gas',       batch_size=853)
+    # train, test = prepare_uci_loaders('miniboone', batch_size=30)
