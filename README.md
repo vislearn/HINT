@@ -1,8 +1,9 @@
 # HINT
 Code for the research paper "HINT: Hierarchical Invertible Neural Transport for Density Estimation and Bayesian Inference".
 
-![Dense triangular Jacobian via recursive coupling](recursive_coupling_small.png)
-![Approximating a 2D shape with Fourier curve parameterization](fourier_curve_example_small.png)
+![Dense triangular Jacobian via recursive coupling](dense_jacobian.png)
+![Structure of our recursive coupling block](recursive_block.png)
+![Approximating a 2D shape with Fourier curve parameterization](fourier_curve.png)
 
 A pre-print is available at [arXiv](https://arxiv.org/abs/1905.10687), for now please cite as:
 ```
