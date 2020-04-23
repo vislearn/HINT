@@ -4,10 +4,6 @@ import torch
 from FrEIA.framework import *
 from FrEIA.modules import *
 
-import sys
-sys.path.insert(0, '../../')
-from hint import *
-
 from data import PlusShapeModel as model
 from data import prepare_data_loaders
 n_parameters, n_observations = model.n_parameters, model.n_observations

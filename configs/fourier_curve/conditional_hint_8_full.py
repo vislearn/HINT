@@ -32,7 +32,7 @@ c = {
 
     # MODEL ARCHITECTURE
     'n_blocks': 8,
-    'hidden_layer_sizes': 58, # 400k
+    'hidden_layer_sizes': 68, # 400k
     'init_scale': 0.005,
 
     # TRAINING HYPERPARAMETERS
@@ -82,18 +82,18 @@ for i in range(c.n_blocks):
                        {'c_internal': [c.hidden_layer_sizes, c.hidden_layer_sizes//2, c.hidden_layer_sizes//4]},
                        name=f'hac_x_{i+1}'))
 
-    if i < c.n_blocks-1:
-        x_lane.append(Node(x_lane[-1],
-                           ExternalAffineCoupling,
-                           {'F_class': F_fully_connected,
-                            'F_args': {'internal_size': c.hidden_layer_sizes}},
-                           conditions=y_lane[-1],
-                           name=f'ac_y_to_x_{i+1}'))
+    # if i < c.n_blocks-1:
+    x_lane.append(Node(x_lane[-1],
+                       ExternalAffineCoupling,
+                       {'F_class': F_fully_connected,
+                        'F_args': {'internal_size': c.hidden_layer_sizes}},
+                       conditions=y_lane[-1],
+                       name=f'ac_y_to_x_{i+1}'))
 
     y_lane.append(Node(y_lane[-1],
                        AffineCoupling,
                        {'F_class': F_fully_connected,
-                        'F_args': {'internal_size': c.hidden_layer_sizes}},
+                        'F_args': {'internal_size': c.hidden_layer_sizes//4}},
                        name=f'ac_y_{i+1}'))
 
 y_lane.append(OutputNode(y_lane[-1], name='z_y'))

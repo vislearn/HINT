@@ -4,10 +4,6 @@ import torch
 from FrEIA.framework import *
 from FrEIA.modules import *
 
-import sys
-sys.path.insert(0, '../../')
-from hint import *
-
 from data import FourierCurveModel as model
 from data import prepare_data_loaders
 n_parameters, n_observations = model.n_parameters, model.n_observations
@@ -32,7 +28,7 @@ c = {
 
     # MODEL ARCHITECTURE
     'n_blocks': 2,
-    'hidden_layer_sizes': 151, # 200k
+    'hidden_layer_sizes': 217, # 400k
     'init_scale': 0.005,
 
     # TRAINING HYPERPARAMETERS

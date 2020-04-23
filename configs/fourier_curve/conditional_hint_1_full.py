@@ -32,7 +32,7 @@ c = {
 
     # MODEL ARCHITECTURE
     'n_blocks': 1,
-    'hidden_layer_sizes': 143, # 200k
+    'hidden_layer_sizes': 205, # 400k
     'init_scale': 0.005,
 
     # TRAINING HYPERPARAMETERS

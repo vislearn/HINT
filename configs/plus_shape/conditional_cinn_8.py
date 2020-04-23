@@ -4,10 +4,6 @@ import torch
 from FrEIA.framework import *
 from FrEIA.modules import *
 
-import sys
-sys.path.insert(0, '../../')
-from hint import *
-
 from data import PlusShapeModel as model
 from data import prepare_data_loaders
 n_parameters, n_observations = model.n_parameters, model.n_observations
@@ -19,7 +15,7 @@ n_parameters, n_observations = model.n_parameters, model.n_observations
 
 c = {
     # GENERAL STUFF
-    'suffix': f'{model.name}_conditional_cinn-8', # identifier for trained models and outputs
+    'suffix': f'{model.name}_conditional_cinn-8-test', # identifier for trained models and outputs
     'device': 'cuda', # 'cuda' for GPU, 'cpu' for CPU
     'interactive_visualization': True, # requires visdom package to be installed
 
