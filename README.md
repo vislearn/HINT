@@ -27,6 +27,15 @@ In order to run the code, you will need the following:
 + [`FrEIA`](https://github.com/VLL-HD/FrEIA/)
 
 
+Alternatively, you can [load a conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file) with all dependencies by invoking:
+
+``` shell
+$ conda env create -f environment.yml
+```
+
+This will create a `cpuonly` environment to run HINT.
+
+
 ### Structure
 
 There is one script for [training unconditional models](../master/train_unconditional.py) and one for [training conditional models](../master/train_conditional.py).
