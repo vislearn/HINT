@@ -23,7 +23,7 @@ In order to run the code, you will need the following:
 
 + `PyTorch` (>= v1.0.0)
 + `Python` (>= v3.7)
-  + Packages `numpy`, `scipy`, `pandas`, `shapely` & `visdom`
+  + Packages `numpy`, `scipy`, `pandas`, `shapely`, `matplotlib`, `tqdm` & `visdom`
 + [`FrEIA`](https://github.com/VLL-HD/FrEIA/)
 
 
