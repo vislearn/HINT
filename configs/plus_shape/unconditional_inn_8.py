@@ -28,7 +28,7 @@ c = {
 
     # MODEL ARCHITECTURE
     'n_blocks': 8,
-    'hidden_layer_sizes': 226, # 2M
+    'hidden_layer_sizes': 226, # 220, # 2M
     'init_scale': 0.005,
 
     # TRAINING HYPERPARAMETERS
@@ -50,32 +50,37 @@ train_loader, test_loader = prepare_data_loaders(c['data_model'], c['n_train'], 
 c['train_loader'] = train_loader
 c['test_loader'] = test_loader
 
-# create namedtuple from config dictionary
-c = namedtuple("Configuration",c.keys())(*c.values())
-
 
 ##############################
 ###   MODEL ARCHITECTURE   ###
 ##############################
 
-nodes = [InputNode(c.ndim_x, name='x')]
+nodes = [InputNode(c['ndim_x'], name='x')]
 
-for i in range(c.n_blocks):
+for i in range(c['n_blocks']):
     nodes.append(Node(nodes[-1],
                       HouseholderPerm,
-                      {'fixed': True, 'n_reflections': c.ndim_x},
+                      {'fixed': True, 'n_reflections': c['ndim_x']},
                       name=f'perm_{i+1}'))
     nodes.append(Node(nodes[-1],
                       AffineCoupling,
                       {'F_class': F_fully_connected,
-                       'F_args': {'internal_size': c.hidden_layer_sizes}},
+                       'F_args': {'internal_size': c['hidden_layer_sizes']}},
                       name=f'ac_{i+1}'))
 
 nodes.append(OutputNode(nodes[-1], name='z'))
 
 model = ReversibleGraphNet(nodes, verbose=False)
-model.to(c.device)
+model.to(c['device'])
+model.params_trainable = list(filter(lambda p: p.requires_grad, model.parameters()))
 
 
 def model_inverse(test_z):
     return model([test_z], rev=True)
+
+
+c['model'] = model
+c['model_inverse'] = model_inverse
+
+# create namedtuple from config dictionary
+c = namedtuple("Configuration",c.keys())(*c.values())

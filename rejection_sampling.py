@@ -4,30 +4,53 @@ import time
 import os
 import matplotlib.pyplot as plt
 import pickle
+from collections import defaultdict
 from tqdm import tqdm
 from scipy.spatial import distance_matrix
-from data import FourierCurveModel
+
+from data import *
 
 
-# Choose data set
-dataset = ('fourier_curve', 'fourier-curve')
+# Import and organize all the models
+# dataset = ('fourier_curve', 'fourier-curve')
+dataset = ('lens_shape', 'lens-shape')
 # dataset = ('plus_shape', 'plus-shape')
-
-# Choose number of run (3 to 5 training runs were used to calculate error statistics)
 run = 0
-
-# Uncomment to import and prepare saved models
 conditional_models = {}
 # for name in ['conditional_cinn_1', 'conditional_cinn_2', 'conditional_cinn_4', 'conditional_cinn_8', 'conditional_hint_1_full', 'conditional_hint_2_full', 'conditional_hint_4_full', 'conditional_hint_8_full']:
 #     exec("import configs." + dataset[0] + "." + name + " as " + name)
-#     exec(name + ".model.load_state_dict(torch.load(f'output/{run}/{" + name + ".c.suffix}.pt')['net'])")
+#     # exec(name + ".model.load_state_dict(torch.load(f'output/{run}/{" + name + ".c.suffix}.pt')['net'])")
+#     exec(name + ".model.load_state_dict(torch.load(f'results/{dataset[0]}-{name}_{run}.pt')['net'])")
 #     exec("conditional_models[" + name + ".c.suffix] = {'model': " + name + ".model, 'inverse': " + name + ".model_inverse}")
 unconditional_models = {}
 # for name in ['unconditional_inn_1', 'unconditional_inn_2', 'unconditional_hint_1_full', 'unconditional_hint_2_full']:
 #     exec("import configs." + dataset[0] + "." + name + " as " + name)
-#     exec(name + ".model.load_state_dict(torch.load(f'output/{run}/{" + name + ".c.suffix}.pt')['net'])")
+#     # exec(name + ".model.load_state_dict(torch.load(f'output/{run}/{" + name + ".c.suffix}.pt')['net'])")
+#     exec(name + ".model.load_state_dict(torch.load(f'results/{dataset[0]}-{name}_{run}.pt')['net'])")
 #     exec("unconditional_models[" + name + ".c.suffix] = {'model': " + name + ".model, 'inverse': " + name + ".model_inverse}")
 
+
+def check_mmd_kernels(x, y, widths_exponents=[(1, 0.5), (0.2, 0.8), (0.2, 0.4)]):
+    # compute distance matrices dxx, dyy, dxy
+    xx, yy, xy = torch.mm(x,x.t()), torch.mm(y,y.t()), torch.mm(x,y.t())
+    rx = xx.diag().unsqueeze(0).expand_as(xx)
+    ry = yy.diag().unsqueeze(0).expand_as(yy)
+    dxx = torch.clamp(rx.t() + rx - 2.*xx, 0, np.inf)
+    dyy = torch.clamp(ry.t() + ry - 2.*yy, 0, np.inf)
+    dxy = torch.clamp(rx.t() + ry - 2.*xy, 0, np.inf)
+    # plot histogram
+    bins = np.linspace(0, 20, 100)
+    plt.hist(dxx.data.cpu().numpy().reshape(-1), bins, alpha=.5, label='dxx', density=True)
+    plt.hist(dyy.data.cpu().numpy().reshape(-1), bins, alpha=.5, label='dyy', density=True)
+    plt.hist(dxy.data.cpu().numpy().reshape(-1), bins, alpha=.5, label='dxy', density=True)
+    # overlay kernels
+    multi_kernel = np.zeros(*bins.shape)
+    for C, a in widths_exponents:
+        multi_kernel += C**a * ((C+bins)/a)**-a
+        plt.plot(bins, C**a * ((C+bins)/a)**-a, label=f'{C:.2f}/{a:.2f}')
+    plt.plot(bins, multi_kernel, lw=2, c='k', label='sum')
+    plt.legend(loc='upper right')
+    plt.show()
 
 
 def multi_mmd(x, y, widths_exponents=[(0.5, 1), (0.2, 1), (0.2, 0.5)]):
@@ -74,9 +97,39 @@ def quantile_ABC(x, y, y_target, n=4000):
 
 
 def mean_target_distance(model, y_target, x):
-    y = model.forward_process(x.cpu().numpy())[:,2:]
+    y = model.forward_process(x.cpu().numpy())#[:,2:]
     dist = torch.sum((torch.FloatTensor(y) - y_target[0].cpu())**2, dim=1).sqrt()
     return dist.mean()
+
+
+def correlation_conditional(data_model, y_target, n=4000):
+    y_target = np.array(y_target)
+    try:
+        sample = np.load(f'data/{data_model.name}_corr_conditional_sample.npy')
+    except:
+        if data_model.name == 'lens-shape':
+            x, y = np.load(f'abc/{data_model.name}_x_huge.npy'), np.load(f'abc/{data_model.name}_y_huge.npy')
+            sample, _ = quantile_ABC(x, y, [y_target], n=n)
+        if data_model.name == 'plus-shape':
+            samples = []
+            labels = []
+            while len(samples) < n:
+                coords, label = data_model.generate_plus_shape(forward=True, target=y_target)
+                d = np.sqrt(np.sum(np.square(y_target - label)))
+                if d < 0.05:
+                    sample = data_model.fourier_coeffs(coords, n_coeffs=PlusShapeModel.n_parameters//4)
+                    samples.append(sample)
+                    labels.append(label)
+                    print(f' {len(samples)} ', end='', flush=True)
+                print('.', end='')
+            sample = np.stack(samples)
+            labels = np.stack(labels)
+            sample = data_model.flatten_coeffs(sample)
+
+    np.save(f'data/{data_model.name}_corr_conditional_sample.npy', sample)
+    corr = np.corrcoef(sample.T)
+    np.save(f'data/{data_model.name}_corr_conditional.npy', corr)
+    print(corr.shape)
 
 
 def compare_unconditional(data_model, n_runs=100, sample_size=4000):
@@ -161,31 +214,32 @@ def compare_conditional(data_model, n_runs=1000, sample_size=4000):
 
 
 def accumulate_metrics_unconditional():
-    mmds = {'fourier-curve_unconditional_inn-1':[], 'fourier-curve_unconditional_inn-2':[], 'fourier-curve_unconditional_hint-1-full':[], 'fourier-curve_unconditional_hint-2-full':[]}
-    for i in range(5):
-        with open(f'abc/fourier-curve_unconditional_comparison_{i+1}.pkl', 'rb') as f:
+    mmds = {'lens-shape_unconditional_inn-1':[], 'lens-shape_unconditional_inn-2':[], 'lens-shape_unconditional_hint-1-full':[], 'lens-shape_unconditional_hint-2-full':[]}
+    for i in range(3):
+        with open(f'abc/lens-shape_unconditional_comparison_{i}.pkl', 'rb') as f:
             d = pickle.load(f)
         for name, model in d.items():
             # print(name, np.mean(model['mmds']), np.std(model['mmds']))
             mmds[name].append(np.mean(model['mmds']))
     for name in mmds.keys():
         print(name)
-        print(np.mean(mmds[name]))
-        print(np.std(mmds[name]))
+        print(f'{np.nanmean(mmds[name]):.3f} \\pm {np.nanstd(mmds[name]):.3f}')
         print()
 
 
 def accumulate_metrics_conditional():
-    mmds = {'fourier-curve_conditional_cinn-1':[], 'fourier-curve_conditional_cinn-2':[], 'fourier-curve_conditional_cinn-4':[], 'fourier-curve_conditional_cinn-8':[], 'fourier-curve_conditional_hint-1-full':[], 'fourier-curve_conditional_hint-2-full':[], 'fourier-curve_conditional_hint-4-full':[], 'fourier-curve_conditional_hint-8-full':[]}
+    # mmds = {'fourier-curve_conditional_cinn-1':[], 'fourier-curve_conditional_cinn-2':[], 'fourier-curve_conditional_cinn-4':[], 'fourier-curve_conditional_cinn-8':[], 'fourier-curve_conditional_hint-1-full':[], 'fourier-curve_conditional_hint-2-full':[], 'fourier-curve_conditional_hint-4-full':[], 'fourier-curve_conditional_hint-8-full':[]}
+    mmds = {'lens-shape_conditional_cinn-1':[], 'lens-shape_conditional_cinn-2':[], 'lens-shape_conditional_cinn-4':[], 'lens-shape_conditional_cinn-8':[], 'lens-shape_conditional_hint-1-full':[], 'lens-shape_conditional_hint-2-full':[], 'lens-shape_conditional_hint-4-full':[], 'lens-shape_conditional_hint-8-full':[]}
     for i in range(3):
-        with open(f'abc/fourier-curve_conditional_comparison_{i+1}.pkl', 'rb') as f:
+        # with open(f'abc/fourier-curve_conditional_comparison_{i+1}.pkl', 'rb') as f:
+        with open(f'abc/lens-shape_conditional_comparison_{i}.pkl', 'rb') as f:
             d = pickle.load(f)
         for name, model in d.items():
             # print(name, np.mean(model['mmds']), np.std(model['mmds']))
             mmds[name].append(np.mean(model['mmds']))
     for name in mmds.keys():
         print(name)
-        print(f'{np.nanmean(mmds[name]):.4f} \pm {np.nanstd(mmds[name]):.4f}')
+        print(f'{np.nanmean(mmds[name]):.3f} \\pm {np.nanstd(mmds[name]):.3f}')
         print()
 
 
@@ -193,10 +247,21 @@ def accumulate_metrics_conditional():
 if __name__ == '__main__':
     pass
 
-    prepare_samples(FourierCurveModel())
+    # prepare_samples(FourierCurveModel())
+    # prepare_samples(LensShapeModel())
+
+    # correlation_conditional(PlusShapeModel(), (0.75, 0.0, 1.0, 3.0), n=4000)
+    # correlation_conditional(LensShapeModel(), (2.0, -1.0), n=4000)
+
+    # x = torch.tensor(np.load('abc/fourier-curve_x_huge.npy')[:4000]).cuda()
+    # y = torch.tensor(np.load('abc/fourier-curve_x_huge.npy')[-4000:]).cuda()
+    # check_mmd_kernels(x,y)
 
     # compare_conditional(FourierCurveModel())
-    # accumulate_metrics_conditional()
-
     # compare_unconditional(FourierCurveModel())
+
+    # compare_conditional(LensShapeModel())
+    # compare_unconditional(LensShapeModel())
+
     # accumulate_metrics_unconditional()
+    # accumulate_metrics_conditional()

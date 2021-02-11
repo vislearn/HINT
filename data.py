@@ -15,10 +15,7 @@ from tqdm import tqdm
 # np.seterr(divide='ignore', invalid='ignore')
 
 
-''' UCI data preparation adapted from https://github.com/LukasRinder/normalizing-flows
-To use these data sets, download https://zenodo.org/record/1161203/files/data.tar.gz
-and extract 'power', 'gas' and 'miniboone' into a directory named 'uci_data'
-'''
+# UCI data preparation adapted from https://github.com/LukasRinder/normalizing-flows
 
 
 # Helper classes and functions
@@ -114,6 +111,20 @@ class FourierCurveModel():
             samples = self.flatten_coeffs(samples)
         return samples
 
+    def sample_joint(self, n_samples, flat=True):
+        samples = []
+        labels = []
+        for i in range(n_samples):
+            c = np.random.choice(self.n_components, p=self.component_weights)
+            sample = self.mus[c] + self.sigmas[c] * np.random.randn(*self.coeffs_shape)
+            samples.append(sample.astype(np.float32).view(np.complex64))
+            labels.append(self.flatten_coeffs(self.forward_process(samples[-1])))
+        samples = np.stack(samples)
+        labels = np.stack(labels)
+        if flat:
+            samples = self.flatten_coeffs(samples)
+        return samples, labels
+
     def logprior(self, x):
         p = 0.0
         for i in range(self.n_components):
@@ -206,10 +217,102 @@ class FourierCurveModel():
 
 
 
+class LensShapeModel(FourierCurveModel):
+
+    n_parameters = 4*5 # must be uneven number times four
+    n_observations = 2
+    name = 'lens-shape'
+
+    def __init__(self):
+        self.name = 'lens-shape'
+
+    def generate_lens_shape(self):
+        # First circle
+        x0, y0, r0 = 0, 0, 1 + rand()
+        p0 = geo.Point(x0, y0).buffer(r0)
+        # Second circle
+        r1 = 2*r0
+        theta = 2*np.pi * rand() # Random angle
+        d = 0.8 * (r0 + r1) # Distance of centers
+        x1, y1 = x0 + d * np.sin(theta), y0 + d * np.cos(theta)
+        p1 = geo.Point(x1, y1).buffer(r1)
+        # Intersect
+        shape = p0.intersection(p1)
+        # Center with a little noise
+        coords = np.array(shape.exterior.coords)
+        coords -= coords.mean(axis=0) + 0.5 * randn(1,2)
+        return coords
+
+    def sample_prior(self, n_samples, flat=True):
+        samples = []
+        for i in range(n_samples):
+            coords = self.generate_lens_shape()
+            sample = self.fourier_coeffs(coords, n_coeffs=LensShapeModel.n_parameters//4)
+            samples.append(sample)
+        samples = np.stack(samples)
+        if flat:
+            samples = self.flatten_coeffs(samples)
+        return samples
+
+    def sample_joint(self, n_samples, flat=True):
+        samples = []
+        labels = []
+        for i in tqdm(range(n_samples)):
+            coords = self.generate_lens_shape()
+            sample = self.fourier_coeffs(coords, n_coeffs=PlusShapeModel.n_parameters//4)
+            samples.append(sample)
+            labels.append(self.flatten_coeffs(self.forward_process(samples[-1])))
+        samples = np.stack(samples)
+        labels = np.stack(labels)
+        if flat:
+            samples = self.flatten_coeffs(samples)
+        return samples, labels
+
+
+    def forward_process(self, x, noise=0.05):
+        x = self.unflatten_coeffs(x)
+        points = self.trace_fourier_curves(x)
+        features = []
+        for i in range(len(x)):
+            # Find dominant angle and largest diameter of the shape
+            d = squareform(pdist(points[i]))
+            max_idx = np.unravel_index(d.argmax(), d.shape)
+            p0, p1 = points[i,max_idx[0]], points[i,max_idx[1]]
+            # features.append((angle, max_diameter))
+            features.append(((p1-p0)[1], (p1-p0)[0]))
+        features = np.array(features)
+        return features + noise * randn(*features.shape)
+
+    def update_plot(self, x, y_target=None, n_bold=3, show_forward=True):
+        plt.gcf().clear()
+        x = self.unflatten_coeffs(np.array(x))
+        points = self.trace_fourier_curves(x)
+        for i in range(len(points)):
+            plt.plot(points[i,:,0], points[i,:,1], c=(0,0,0,min(1,10/len(points))))
+            if i >= len(points) - n_bold:
+                plt.plot(points[i,:,0], points[i,:,1], c=(0,0,0))
+                if show_forward:
+                    if y_target is not None:
+                        diff_1, diff_0 = y_target
+                        # Visualize angle and scale
+                        # TODO
+                    # Plot dominant angle and largest diameter of the shape
+                    d = squareform(pdist(points[i]))
+                    max_idx = np.unravel_index(d.argmax(), d.shape)
+                    d0, d1 = points[i,max_idx[0]], points[i,max_idx[1]]
+                    plt.plot([d0[0], d1[0]], [d0[1], d1[1]], c=(0,1,0), ls='-', lw=1)
+                    plt.scatter([d0[0], d1[0]], [d0[1], d1[1]], c=[(0,1,0)], s=3, zorder=10)
+
+        plt.axis('equal')
+        plt.axis([min(-5, points[:,:,0].min() - 1), max(5, points[:,:,0].max() + 1),
+                  min(-5, points[:,:,1].min() - 1), max(5, points[:,:,1].max() + 1)])
+
+
+
 class PlusShapeModel(FourierCurveModel):
 
     n_parameters = 4*25 # must be uneven number times four
-    n_observations = 3
+    n_observations = 4
     name = 'plus-shape'
 
     def __init__(self):
@@ -226,14 +329,22 @@ class PlusShapeModel(FourierCurveModel):
             all.append(dense)
         return np.concatenate(all)
 
-    def generate_plus_shape(self):
+    def generate_plus_shape(self, forward=False, target=None):
         # Properties of x and y bar
         xlength = 3 + 2 * rand()
         ylength = 3 + 2 * rand()
-        xwidth = .5 + 1.5 * rand()
-        ywidth = .5 + 1.5 * rand()
+        if target is None:
+            xwidth = .5 + 1.5 * rand()
+            ywidth = .5 + 1.5 * rand()
+        else:
+            if target[3] >= 1:
+                xwidth = target[3]*.5 + (2 - target[3]*0.5) * rand()
+            else:
+                xwidth = 0.5 + (2*target[3] - 0.5) * rand()
+            ywidth = xwidth/target[3]
         xshift = -1.5 + 3 * rand()
         yshift = -1.5 + 3 * rand()
+        center = np.array([0.0, 0.0])
         # Create bars and compute union
         xbar = geo.box(xshift - xlength/2, -xwidth/2, xshift + xlength/2, xwidth/2)
         ybar = geo.box(-ywidth/2, yshift - ylength/2, ywidth/2, yshift + ylength/2)
@@ -241,12 +352,23 @@ class PlusShapeModel(FourierCurveModel):
         coords = np.array(both.exterior.coords[:-1])
         # Add points inbetween, center, rotate and shift randomly
         coords = self.densify_polyline(coords)
+        center -= coords.mean(axis=0)
         coords -= coords.mean(axis=0)
-        angle = 0.5*np.pi * rand()
+        if target is None:
+            angle = 0.5*np.pi * rand()
+        else:
+            angle = target[2]
         rotation = np.array([[np.cos(angle), np.sin(angle)], [-np.sin(angle), np.cos(angle)]])
         coords = np.dot(coords, rotation)
-        coords += 0.5 * randn(1,2)
-        return coords
+        center = np.dot(center, rotation)
+        offset = 0.5 * randn(1,2)
+        coords += offset
+        center += offset[0,:]
+
+        if forward:
+            return coords, np.array([center[0], center[1], angle, xwidth/ywidth])
+        else:
+            return coords
 
     def sample_prior(self, n_samples, flat=True):
         samples = []
@@ -259,6 +381,40 @@ class PlusShapeModel(FourierCurveModel):
             samples = self.flatten_coeffs(samples)
         return samples
 
+    def sample_joint(self, n_samples, flat=True):
+        samples = []
+        labels = []
+        for i in tqdm(range(n_samples)):
+            coords, label = self.generate_plus_shape(forward=True)
+            sample = self.fourier_coeffs(coords, n_coeffs=PlusShapeModel.n_parameters//4)
+            samples.append(sample)
+            labels.append(label)
+        samples = np.stack(samples)
+        labels = np.stack(labels)
+        if flat:
+            samples = self.flatten_coeffs(samples)
+        return samples, labels
+
+    def update_plot(self, x, y_target=None, n_bold=3, show_forward=True):
+        plt.gcf().clear()
+        x = self.unflatten_coeffs(np.array(x))
+        points = self.trace_fourier_curves(x)
+        for i in range(len(points)):
+            plt.plot(points[i,:,0], points[i,:,1], c=(0,0,0,min(1,10/len(points))), zorder=1)
+            plt.axvline(0, c='gray', ls=':', lw=.5, zorder=-1)
+            plt.axhline(0, c='gray', ls=':', lw=.5, zorder=-1)
+            if i >= len(points) - n_bold:
+                plt.plot(points[i,:,0], points[i,:,1], c=(0,0,0))
+                if show_forward:
+                    if y_target is not None:
+                        center_x, center_y, angle, ratio = y_target
+                        plt.plot([center_x - 100*np.cos(angle), center_x + 100*np.cos(angle)], [center_y - 100*np.sin(angle), center_y + 100*np.sin(angle)], lw=30, color=(0,1,0,0.1), zorder=-10)
+                        plt.plot([center_x + 100*np.sin(angle), center_x - 100*np.sin(angle)], [center_y - 100*np.cos(angle), center_y + 100*np.cos(angle)], lw=30/ratio, color=(0,1,0,0.1), zorder=-10)
+
+        plt.axis('equal')
+        plt.axis([min(-5, points[:,:,0].min() - 1), max(5, points[:,:,0].max() + 1),
+                  min(-5, points[:,:,1].min() - 1), max(5, points[:,:,1].max() + 1)])
+
 
 
 class Power:
@@ -268,7 +424,7 @@ class Power:
 
     def __init__(self):
 
-        trn, val, tst = self.load_data_normalised()
+        trn, val, tst = Power.load_data_normalised()
 
         self.trn = Data(trn)
         self.val = Data(val)
@@ -276,9 +432,11 @@ class Power:
 
         self.n_dims = self.trn.x.shape[1]
 
+    @classmethod
     def load_data(self):
         return np.load('uci_data/power/data.npy')
 
+    @classmethod
     def load_data_split_with_noise(self):
 
         rng = np.random.RandomState(42)
@@ -307,6 +465,7 @@ class Power:
 
         return data_train, data_validate, data_test
 
+    @classmethod
     def load_data_normalised(self):
 
         data_train, data_validate, data_test = self.load_data_split_with_noise()
@@ -319,6 +478,13 @@ class Power:
 
         return data_train, data_validate, data_test
 
+    @classmethod
+    def mean_and_std(self):
+
+        data_train, data_validate, data_test = self.load_data_split_with_noise()
+        data = np.vstack((data_train, data_validate))
+        return data.mean(axis=0), data.std(axis=0)
+
 
 
 class Gas:
@@ -328,7 +494,7 @@ class Gas:
 
     def __init__(self):
 
-        trn, val, tst = self.load_data_and_clean_and_split('uci_data/gas/ethylene_CO.pickle')
+        trn, val, tst = Gas.load_data_and_clean_and_split('uci_data/gas/ethylene_CO.pickle')
 
         self.trn = Data(trn)
         self.val = Data(val)
@@ -336,6 +502,7 @@ class Gas:
 
         self.n_dims = self.trn.x.shape[1]
 
+    @classmethod
     def load_data(self, file):
 
         data = pd.read_pickle(file)
@@ -344,6 +511,7 @@ class Gas:
         data.drop("Time", axis=1, inplace=True)
         return data
 
+    @classmethod
     def get_correlation_numbers(self, data):
 
         C = data.corr()
@@ -351,6 +519,7 @@ class Gas:
         B = A.values.sum(axis=1)
         return B
 
+    @classmethod
     def load_data_and_clean(self, file):
 
         data = self.load_data(file)
@@ -361,10 +530,11 @@ class Gas:
             col_name = data.columns[col_to_remove]
             data.drop(col_name, axis=1, inplace=True)
             B = self.get_correlation_numbers(data)
-        data = (data-data.mean())/data.std()
 
+        data = (data-data.mean())/data.std()
         return data
 
+    @classmethod
     def load_data_and_clean_and_split(self, file):
 
         data = self.load_data_and_clean(file).values
@@ -377,6 +547,20 @@ class Gas:
 
         return data_train, data_validate, data_test
 
+    @classmethod
+    def mean_and_std(self, file='uci_data/gas/ethylene_CO.pickle'):
+
+        data = self.load_data(file)
+        B = self.get_correlation_numbers(data)
+
+        while np.any(B > 1):
+            col_to_remove = np.where(B > 1)[0][0]
+            col_name = data.columns[col_to_remove]
+            data.drop(col_name, axis=1, inplace=True)
+            B = self.get_correlation_numbers(data)
+
+        return data.mean(), data.std()
+
 
 
 class Miniboone:
@@ -386,7 +570,7 @@ class Miniboone:
 
     def __init__(self):
 
-        trn, val, tst = self.load_data_normalised('uci_data/miniboone/data.npy')
+        trn, val, tst = Miniboone.load_data_normalised('uci_data/miniboone/data.npy')
 
         self.trn = Data(trn[:,0:-1])
         self.val = Data(val[:,0:-1])
@@ -394,6 +578,7 @@ class Miniboone:
 
         self.n_dims = self.trn.x.shape[1]
 
+    @classmethod
     def load_data(self, root_path):
 
         data = np.load(root_path)
@@ -406,6 +591,7 @@ class Miniboone:
 
         return data_train, data_validate, data_test
 
+    @classmethod
     def load_data_normalised(self, root_path):
 
         data_train, data_validate, data_test = self.load_data(root_path)
@@ -418,33 +604,55 @@ class Miniboone:
 
         return data_train, data_validate, data_test
 
+    @classmethod
+    def mean_and_std(self):
 
+        data_train, data_validate, data_test = self.load_data('uci_data/miniboone/data.npy')
+        data = np.vstack((data_train, data_validate))
+        return data.mean(axis=0), data.std(axis=0)
 
 
 
 def prepare_data_loaders(model, n_train, n_test, batch_size):
     try:
         x_train = np.load(f'data/{model.name}_x_train.npy')[:n_train,:]
-        x_test = np.load(f'data/{model.name}_x_test.npy')[:n_test,:]
-    except Exception as e:
-        print(f'\nNot enough training data for model "{model.name}" found, generating {n_train + n_test} new samples...\n')
-        x_train = model.sample_prior(n_train)
-        np.save(f'data/{model.name}_x_train', x_train)
-        x_test = model.sample_prior(n_test)
-        np.save(f'data/{model.name}_x_test', x_test)
-    try:
         y_train = np.load(f'data/{model.name}_y_train.npy')[:n_train,]
+    except Exception as e:
+        print(f'\nNot enough training data for model "{model.name}" found, generating {n_train} new training samples...')
+        x_train, y_train = model.sample_joint(n_train)
+        np.save(f'data/{model.name}_x_train', x_train)
+        np.save(f'data/{model.name}_y_train', y_train)
+    try:
+        x_test = np.load(f'data/{model.name}_x_test.npy')[:n_test,:]
         y_test = np.load(f'data/{model.name}_y_test.npy')[:n_test,:]
     except Exception as e:
-        print(f'\nNot enough training labels for model "{model.name}" found, running forward process on {n_train + n_test} samples...\n')
-        y_train = []
-        for i in range((n_train-1)//100000 + 1):
-            print(f'Forward process chunk {i+1}...')
-            y_train.append(model.forward_process(x_train[100000*i : min(n_train, 100000*(i+1)),:]))
-        y_train = np.concatenate(y_train, axis=0)
-        np.save(f'data/{model.name}_y_train', y_train)
-        y_test = model.forward_process(x_test)
+        print(f'\nNot enough test data for model "{model.name}" found, generating {n_test} new test samples...')
+        x_test, y_test = model.sample_joint(n_test)
+        np.save(f'data/{model.name}_x_test', x_test)
         np.save(f'data/{model.name}_y_test', y_test)
+
+    # try:
+    #     x_train = np.load(f'data/{model.name}_x_train.npy')[:n_train,:]
+    #     x_test = np.load(f'data/{model.name}_x_test.npy')[:n_test,:]
+    # except Exception as e:
+    #     print(f'\nNot enough training data for model "{model.name}" found, generating {n_train + n_test} new samples...\n')
+    #     x_train = model.sample_prior(n_train)
+    #     np.save(f'data/{model.name}_x_train', x_train)
+    #     x_test = model.sample_prior(n_test)
+    #     np.save(f'data/{model.name}_x_test', x_test)
+    # try:
+    #     y_train = np.load(f'data/{model.name}_y_train.npy')[:n_train,]
+    #     y_test = np.load(f'data/{model.name}_y_test.npy')[:n_test,:]
+    # except Exception as e:
+    #     print(f'\nNot enough training labels for model "{model.name}" found, running forward process on {n_train + n_test} samples...\n')
+    #     y_train = []
+    #     for i in range((n_train-1)//100000 + 1):
+    #         print(f'Forward process chunk {i+1}...')
+    #         y_train.append(model.forward_process(x_train[100000*i : min(n_train, 100000*(i+1)),:]))
+    #     y_train = np.concatenate(y_train, axis=0)
+    #     np.save(f'data/{model.name}_y_train', y_train)
+    #     y_test = model.forward_process(x_test)
+    #     np.save(f'data/{model.name}_y_test', y_test)
 
     train_loader = DataLoader(TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train)),
                               batch_size=batch_size, shuffle=True, drop_last=True)
@@ -483,3 +691,5 @@ if __name__ == '__main__':
     # train, test = prepare_uci_loaders('power',     batch_size=1660)
     # train, test = prepare_uci_loaders('gas',       batch_size=853)
     # train, test = prepare_uci_loaders('miniboone', batch_size=30)
+
+    prepare_data_loaders(PlusShapeModel(), 1000000, 100000, 10000)

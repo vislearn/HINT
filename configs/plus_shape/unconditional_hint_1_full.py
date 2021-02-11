@@ -4,10 +4,6 @@ import torch
 from FrEIA.framework import *
 from FrEIA.modules import *
 
-import sys
-sys.path.insert(0, '../../')
-from hint import *
-
 from data import PlusShapeModel as model
 from data import prepare_data_loaders
 n_parameters = model.n_parameters
@@ -54,37 +50,38 @@ train_loader, test_loader = prepare_data_loaders(c['data_model'], c['n_train'], 
 c['train_loader'] = train_loader
 c['test_loader'] = test_loader
 
-# create namedtuple from config dictionary
-c = namedtuple("Configuration",c.keys())(*c.values())
-assert (c.ndim_x + c.ndim_y == c.ndim_z), "Dimensions don't match up!"
-
 
 ##############################
 ###   MODEL ARCHITECTURE   ###
 ##############################
 
-x_lane = [InputNode(c.ndim_x, name='x')]
+x_lane = [InputNode(c['ndim_x'], name='x')]
 
-for i in range(c.n_blocks):
+for i in range(c['n_blocks']):
     if i > 0:
         x_lane.append(Node(x_lane[-1],
                            HouseholderPerm,
-                           {'fixed': False, 'n_reflections': c.ndim_x},
+                           {'fixed': False, 'n_reflections': c['ndim_x']},
                            name=f'perm_{i}'))
 
     x_lane.append(Node(x_lane[-1],
                        HierarchicalAffineCouplingBlock,
-                       {'c_internal': [c.hidden_layer_sizes, c.hidden_layer_sizes//2, c.hidden_layer_sizes//4]},
-                       # AffineCoupling,
-                       # {'F_class': F_fully_connected,
-                       #  'F_args': {'internal_size': c.hidden_layer_sizes}},
+                       {'c_internal': [c['hidden_layer_sizes'], c['hidden_layer_sizes']//2, c['hidden_layer_sizes']//4]},
                        name=f'hac_{i+1}'))
 
 x_lane.append(OutputNode(x_lane[-1], name='z'))
 
 model = ReversibleGraphNet(x_lane, verbose=False)
-model.to(c.device)
+model.to(c['device'])
+model.params_trainable = list(filter(lambda p: p.requires_grad, model.parameters()))
 
 
 def model_inverse(test_z):
     return model(test_z, rev=True)
+
+
+c['model'] = model
+c['model_inverse'] = model_inverse
+
+# create namedtuple from config dictionary
+c = namedtuple("Configuration",c.keys())(*c.values())

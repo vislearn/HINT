@@ -29,9 +29,10 @@ class Visualizer:
             if i == self.n_losses//2:
                 print('  |', end='')
             print(f'{l: {self.col_width}.4e}', end='')
-        # Bits per dimension on test set
-        bpd = -np.sum(losses[self.n_losses//2:]) / (self.c.ndim_z * np.log(2.))
-        print(f'{bpd: {self.col_width}.4f}')
+        # # Bits per dimension on test set
+        # bpd = -np.sum(losses[self.n_losses//2:]) / (self.c.ndim_z * np.log(2.))
+        # print(f'{bpd: {self.col_width}.4f}')
+        print()
 
         self.epoch += 1
 

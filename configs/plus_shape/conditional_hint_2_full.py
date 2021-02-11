@@ -4,10 +4,6 @@ import torch
 from FrEIA.framework import *
 from FrEIA.modules import *
 
-import sys
-sys.path.insert(0, '../../')
-from hint import *
-
 from data import FourierCurveModel as model
 from data import prepare_data_loaders
 n_parameters, n_observations = model.n_parameters, model.n_observations
@@ -54,53 +50,50 @@ train_loader, test_loader = prepare_data_loaders(c['data_model'], c['n_train'], 
 c['train_loader'] = train_loader
 c['test_loader'] = test_loader
 
-# create namedtuple from config dictionary
-c = namedtuple("Configuration",c.keys())(*c.values())
-assert (c.ndim_x + c.ndim_y == c.ndim_z), "Dimensions don't match up!"
-
 
 ##############################
 ###   MODEL ARCHITECTURE   ###
 ##############################
 
-y_lane = [InputNode(c.ndim_y, name='y')]
-x_lane = [InputNode(c.ndim_x, name='x')]
+y_lane = [InputNode(c['ndim_y'], name='y')]
+x_lane = [InputNode(c['ndim_x'], name='x')]
 
-for i in range(c.n_blocks):
+for i in range(c['n_blocks']):
     if i > 0:
         y_lane.append(Node(y_lane[-1],
                            HouseholderPerm,
-                           {'fixed': False, 'n_reflections': c.ndim_y},
+                           {'fixed': False, 'n_reflections': c['ndim_y']},
                            name=f'perm_y_{i}'))
         x_lane.append(Node(x_lane[-1],
                            HouseholderPerm,
-                           {'fixed': False, 'n_reflections': c.ndim_x},
+                           {'fixed': False, 'n_reflections': c['ndim_x']},
                            name=f'perm_x_{i}'))
 
     x_lane.append(Node(x_lane[-1],
                        HierarchicalAffineCouplingBlock,
-                       {'c_internal': [c.hidden_layer_sizes, c.hidden_layer_sizes//2, c.hidden_layer_sizes//4]},
+                       {'c_internal': [c['hidden_layer_sizes'], c['hidden_layer_sizes']//2, c['hidden_layer_sizes']//4]},
                        name=f'hac_x_{i+1}'))
 
-    if i < c.n_blocks-1:
+    if i < c['n_blocks']-1:
         x_lane.append(Node(x_lane[-1],
                            ExternalAffineCoupling,
                            {'F_class': F_fully_connected,
-                            'F_args': {'internal_size': c.hidden_layer_sizes}},
+                            'F_args': {'internal_size': c['hidden_layer_sizes']}},
                            conditions=y_lane[-1],
                            name=f'ac_y_to_x_{i+1}'))
 
     y_lane.append(Node(y_lane[-1],
                        AffineCoupling,
                        {'F_class': F_fully_connected,
-                        'F_args': {'internal_size': c.hidden_layer_sizes}},
+                        'F_args': {'internal_size': c['hidden_layer_sizes']}},
                        name=f'ac_y_{i+1}'))
 
 y_lane.append(OutputNode(y_lane[-1], name='z_y'))
 x_lane.append(OutputNode(x_lane[-1], name='z_x'))
 
 model = ReversibleGraphNet(y_lane + x_lane, verbose=False)
-model.to(c.device)
+model.to(c['device'])
+model.params_trainable = list(filter(lambda p: p.requires_grad, model.parameters()))
 
 
 def model_inverse(test_y, test_z):
@@ -118,3 +111,10 @@ def sample_conditional(y, z_x=None):
     z_y, _ = model([y, z_x])
     y, x = model([z_y, z_x], rev=True)
     return x
+
+
+c['model'] = model
+c['model_inverse'] = model_inverse
+
+# create namedtuple from config dictionary
+c = namedtuple("Configuration",c.keys())(*c.values())

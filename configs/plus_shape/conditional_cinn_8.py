@@ -15,7 +15,7 @@ n_parameters, n_observations = model.n_parameters, model.n_observations
 
 c = {
     # GENERAL STUFF
-    'suffix': f'{model.name}_conditional_cinn-8-test', # identifier for trained models and outputs
+    'suffix': f'{model.name}_conditional_cinn-8', # identifier for trained models and outputs
     'device': 'cuda', # 'cuda' for GPU, 'cpu' for CPU
     'interactive_visualization': True, # requires visdom package to be installed
 
@@ -24,7 +24,7 @@ c = {
     'ndim_y': n_observations,
     'ndim_z': n_parameters,
     'data_model': model(),
-    'vis_y_target': (0.83101039, 0.43478332, 2.32117294),
+    'vis_y_target': (0.75, 0.0, 1.0, 3.0),
 
     # MODEL ARCHITECTURE
     'n_blocks': 8,
@@ -50,35 +50,40 @@ train_loader, test_loader = prepare_data_loaders(c['data_model'], c['n_train'], 
 c['train_loader'] = train_loader
 c['test_loader'] = test_loader
 
-# create namedtuple from config dictionary
-c = namedtuple("Configuration",c.keys())(*c.values())
-
 
 ##############################
 ###   MODEL ARCHITECTURE   ###
 ##############################
 
-nodes = [ConditionNode(c.ndim_y, name='y')]
-nodes.append(InputNode(c.ndim_x, name='x'))
+nodes = [ConditionNode(c['ndim_y'], name='y')]
+nodes.append(InputNode(c['ndim_x'], name='x'))
 
-for i in range(c.n_blocks):
+for i in range(c['n_blocks']):
     nodes.append(Node(nodes[-1],
                       HouseholderPerm,
-                      {'fixed': True, 'n_reflections': c.ndim_x},
+                      {'fixed': False, 'n_reflections': c['ndim_x']},
                       name=f'perm_{i+1}'))
     nodes.append(Node(nodes[-1],
                       AffineCoupling,
                       {'F_class': F_fully_connected,
-                       'F_args': {'internal_size': c.hidden_layer_sizes}},
+                       'F_args': {'internal_size': c['hidden_layer_sizes']}},
                       conditions=nodes[0],
                       name=f'ac_{i+1}'))
 
 nodes.append(OutputNode(nodes[-1], name='z'))
 
 model = ReversibleGraphNet(nodes, verbose=False)
-model.to(c.device)
+model.to(c['device'])
+model.params_trainable = list(filter(lambda p: p.requires_grad, model.parameters()))
 
 
 def model_inverse(test_y, test_z):
     x_test = model([test_z], c=[test_y], rev=True)
     return x_test
+
+
+c['model'] = model
+c['model_inverse'] = model_inverse
+
+# create namedtuple from config dictionary
+c = namedtuple("Configuration",c.keys())(*c.values())
