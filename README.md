@@ -23,8 +23,17 @@ In order to run the code, you will need the following:
 
 + `PyTorch` (>= v1.0.0)
 + `Python` (>= v3.7)
-  + Packages `numpy`, `scipy`, `pandas`, `shapely` & `visdom`
+  + Packages `numpy`, `scipy`, `pandas`, `shapely`, `matplotlib`, `tqdm` & `visdom`
 + [`FrEIA`](https://github.com/VLL-HD/FrEIA/)
+
+
+Alternatively, you can [load a conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file) with all dependencies by invoking:
+
+``` shell
+$ conda env create -f environment.yml
+```
+
+This will create a `cpuonly` environment to run HINT.
 
 
 ### Structure
